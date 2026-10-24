@@ -1,0 +1,1 @@
+{"name":"@botanical-story/game-core","version":"0.1.0","private":true,"type":"module","types":"./src/index.ts","exports":{".":"./src/index.ts"},"dependencies":{"@botanical-story/game-data":"0.1.0","@botanical-story/shared":"0.1.0"}}

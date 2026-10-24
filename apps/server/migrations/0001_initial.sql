@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS players (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), coins integer NOT NULL DEFAULT 100 CHECK (coins >= 0), xp integer NOT NULL DEFAULT 0 CHECK (xp >= 0), level integer NOT NULL DEFAULT 1 CHECK (level >= 1), tutorial_complete boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS inventory (player_id uuid NOT NULL REFERENCES players(id) ON DELETE CASCADE, species_id text NOT NULL, seeds integer NOT NULL DEFAULT 0 CHECK (seeds >= 0), plants integer NOT NULL DEFAULT 0 CHECK (plants >= 0), PRIMARY KEY (player_id, species_id));
+CREATE TABLE IF NOT EXISTS planted (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), player_id uuid NOT NULL REFERENCES players(id) ON DELETE CASCADE, species_id text NOT NULL, x integer NOT NULL CHECK (x BETWEEN 0 AND 19), y integer NOT NULL CHECK (y BETWEEN 0 AND 19), planted_at timestamptz NOT NULL, harvest_at timestamptz NOT NULL, status text NOT NULL DEFAULT 'growing' CHECK (status IN ('growing','harvested')), harvested_at timestamptz);
+CREATE UNIQUE INDEX IF NOT EXISTS one_growing_plant_per_tile ON planted(player_id, x, y) WHERE status = 'growing';
+CREATE TABLE IF NOT EXISTS decorations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), player_id uuid NOT NULL REFERENCES players(id) ON DELETE CASCADE, kind text NOT NULL CHECK (kind IN ('birdbath','bench','planter')), x integer NOT NULL CHECK (x BETWEEN 0 AND 19), y integer NOT NULL CHECK (y BETWEEN 0 AND 19), created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(player_id, x, y));
+CREATE TABLE IF NOT EXISTS wallet_ledger (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), player_id uuid NOT NULL REFERENCES players(id) ON DELETE CASCADE, delta integer NOT NULL, xp_delta integer NOT NULL DEFAULT 0, reason text NOT NULL, reference_id uuid, idempotency_key uuid, created_at timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX IF NOT EXISTS wallet_ledger_idempotency ON wallet_ledger(player_id, idempotency_key);
+CREATE INDEX IF NOT EXISTS wallet_ledger_player_created ON wallet_ledger(player_id, created_at DESC);
