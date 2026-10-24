@@ -20,7 +20,11 @@ Requirements: Node.js 20.19+ (or 22.12+) and PostgreSQL 14+.
 
 4. Open http://localhost:5173. The Vite server proxies /api to the Express API on port 3001.
 
-Useful checks: npm test, npm run typecheck, and npm run build. For the Playwright onboarding smoke test, migrate the database, install Chromium with npx playwright install chromium, then run npm run test:e2e.
+Useful checks: npm test, npm run lint (TypeScript unused-code checks), npm run typecheck, and npm run build. To run the real API persistence test, set TEST_DATABASE_URL to a disposable PostgreSQL database and run npm test; it applies migrations and creates test players. Never use production data. Without this variable, the integration test is skipped.
+
+For the isolated Playwright UI smoke test, install Chromium with npx playwright install chromium, then run npm run test:e2e. This browser test uses mocked API responses and does not prove database persistence; the separate API integration test covers that boundary.
+
+For the full browser-to-PostgreSQL loop, configure DATABASE_URL and SESSION_SECRET for a disposable database, migrate it, then run E2E_LIVE_API=1 npm run test:e2e. It starts both apps, plants a Daisy, refreshes during growth, harvests, sells, and buys another seed.
 
 ## Repository layout
 

@@ -42,7 +42,7 @@ export class NurseryScene extends Phaser.Scene {
     this.input.on("wheel", (_pointer: Phaser.Input.Pointer, _objects: unknown[], _dx: number, dy: number) => this.cameras.main.setZoom(Phaser.Math.Clamp(this.cameras.main.zoom - dy * 0.001, 0.48, 1.25)));
     this.renderWorld();
   }
-  setWorld(world: NurseryWorld) { this.world = world; if (this.scene.isActive()) this.renderWorld(); }
+  setWorld(world: NurseryWorld) { this.world = world; if (this.scene?.isActive()) this.renderWorld(); }
   private center(x: number, y: number) { return { x: 750 + (x - y) * TILE_W / 2, y: 65 + (x + y) * TILE_H / 2 }; }
   private tileAt(worldX: number, worldY: number): Tile | null {
     const px = worldX - 750; const py = worldY - 65;

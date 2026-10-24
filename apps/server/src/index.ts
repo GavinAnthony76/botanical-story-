@@ -17,6 +17,10 @@ app.use(express.json({ limit: "32kb" }));
 const port = Number(process.env.API_PORT ?? 3001);
 const route = (fn: (req: AuthRequest, res: express.Response) => Promise<void>) => (req: AuthRequest, res: express.Response, next: express.NextFunction) => { void fn(req, res).catch(next); };
 const fail = (res: express.Response, message: string, code: string, status = 400) => res.status(status).json({ error: message, code });
+const gameError = (error: unknown, fallback: string) => {
+  const known = ["PLAYER_NOT_FOUND", "LEVEL_LOCKED", "NOT_ENOUGH_COINS", "NO_SEEDS", "TILE_OCCUPIED", "PLANT_NOT_FOUND", "ALREADY_HARVESTED", "NOT_READY"];
+  return error instanceof Error && known.includes(error.message) ? error.message : fallback;
+};
 const parse = <T>(schema: z.ZodType<T>, value: unknown): T | null => { const result = schema.safeParse(value); return result.success ? result.data : null; };
 const addExpr = (column: string, amount: number) => sql.raw(column + " + " + Math.trunc(amount));
 const subExpr = (column: string, amount: number) => sql.raw(column + " - " + Math.trunc(amount));
@@ -47,10 +51,10 @@ app.post("/api/seeds/buy", route(async (req, res) => {
     if (!canUnlock(body.speciesId, player.level)) throw new Error("LEVEL_LOCKED");
     const updated = await tx.update(players).set({ coins: subExpr("coins", cost) }).where(and(eq(players.id, playerId), gte(players.coins, cost))).returning({ id: players.id });
     if (!updated.length) throw new Error("NOT_ENOUGH_COINS");
-    await tx.insert(inventory).values({ playerId, speciesId: body.speciesId, seeds: body.quantity }).onConflictDoUpdate({ target: [inventory.playerId, inventory.speciesId], set: { seeds: addExpr("seeds", body.quantity) } });
+    await tx.insert(inventory).values({ playerId, speciesId: body.speciesId, seeds: body.quantity }).onConflictDoUpdate({ target: [inventory.playerId, inventory.speciesId], set: { seeds: sql`${inventory.seeds} + ${body.quantity}` } });
     await tx.insert(ledger).values({ playerId, delta: -cost, reason: "seed_purchase" });
   }); res.json({ ok: true }); }
-  catch (error) { const code = error instanceof Error ? error.message : "PURCHASE_FAILED"; fail(res, code === "NOT_ENOUGH_COINS" ? "Not enough coins." : code === "LEVEL_LOCKED" ? "That seed unlocks at a later level." : "Unable to buy those seeds.", code); }
+  catch (error) { const code = gameError(error, "PURCHASE_FAILED"); fail(res, code === "NOT_ENOUGH_COINS" ? "Not enough coins." : code === "LEVEL_LOCKED" ? "That seed unlocks at a later level." : "Unable to buy those seeds.", code); }
 }));
 app.post("/api/plants", route(async (req, res) => {
   const body = parse(plantSeedSchema, req.body); if (!body) { fail(res, "Choose a valid tile and seed.", "INVALID_INPUT"); return; }
@@ -66,7 +70,7 @@ app.post("/api/plants", route(async (req, res) => {
     const harvestAt = new Date(now.getTime() + species.growthMs);
     const [created] = await tx.insert(planted).values({ playerId, speciesId: body.speciesId, x: body.x, y: body.y, plantedAt: now, harvestAt }).returning(); return created;
   }); res.status(201).json({ id: plant.id, speciesId: plant.speciesId, x: plant.x, y: plant.y, plantedAt: plant.plantedAt.toISOString(), harvestAt: plant.harvestAt.toISOString(), status: plant.status }); }
-  catch (error) { const code = error instanceof Error ? error.message : "PLANT_FAILED"; fail(res, code === "NO_SEEDS" ? "You need a seed of that kind first." : code === "TILE_OCCUPIED" ? "That spot is already in use." : code === "LEVEL_LOCKED" ? "That seed unlocks at a later level." : "Unable to plant there.", code, code === "TILE_OCCUPIED" ? 409 : 400); }
+  catch (error) { const code = gameError(error, "PLANT_FAILED"); fail(res, code === "NO_SEEDS" ? "You need a seed of that kind first." : code === "TILE_OCCUPIED" ? "That spot is already in use." : code === "LEVEL_LOCKED" ? "That seed unlocks at a later level." : "Unable to plant there.", code, code === "TILE_OCCUPIED" ? 409 : 400); }
 }));
 app.post("/api/plants/harvest", route(async (req, res) => {
   const body = parse(plantIdSchema, req.body); if (!body) { fail(res, "Choose a plant to harvest.", "INVALID_INPUT"); return; }
@@ -76,11 +80,11 @@ app.post("/api/plants/harvest", route(async (req, res) => {
     if (!plant) throw new Error("PLANT_NOT_FOUND"); if (plant.status !== "growing") throw new Error("ALREADY_HARVESTED"); if (plant.harvestAt.getTime() > now.getTime()) throw new Error("NOT_READY");
     const changed = await tx.update(planted).set({ status: "harvested", harvestedAt: now }).where(and(eq(planted.id, body.plantId), eq(planted.playerId, playerId), eq(planted.status, "growing"))).returning({ id: planted.id, speciesId: planted.speciesId });
     if (!changed.length) throw new Error("ALREADY_HARVESTED"); const item = changed[0];
-    await tx.insert(inventory).values({ playerId, speciesId: item.speciesId, seeds: 0, plants: 1 }).onConflictDoUpdate({ target: [inventory.playerId, inventory.speciesId], set: { plants: addExpr("plants", 1) } });
+    await tx.insert(inventory).values({ playerId, speciesId: item.speciesId, seeds: 0, plants: 1 }).onConflictDoUpdate({ target: [inventory.playerId, inventory.speciesId], set: { plants: sql`${inventory.plants} + 1` } });
     const xp = getSpecies(item.speciesId as SpeciesId).xpReward; await tx.update(players).set({ xp: addExpr("xp", xp), level: xpLevelExpr(xp) }).where(eq(players.id, playerId));
     return { speciesId: item.speciesId, xp };
   }); res.json({ ok: true, ...result }); }
-  catch (error) { const code = error instanceof Error ? error.message : "HARVEST_FAILED"; const message = code === "NOT_READY" ? "That plant is still growing." : code === "ALREADY_HARVESTED" ? "This plant has already been harvested." : "Unable to harvest that plant."; fail(res, message, code, code === "PLANT_NOT_FOUND" ? 404 : 409); }
+  catch (error) { const code = gameError(error, "HARVEST_FAILED"); const message = code === "NOT_READY" ? "That plant is still growing." : code === "ALREADY_HARVESTED" ? "This plant has already been harvested." : "Unable to harvest that plant."; fail(res, message, code, code === "PLANT_NOT_FOUND" ? 404 : 409); }
 }));
 app.post("/api/plants/sell", route(async (req, res) => {
   const body = parse(sellSchema, req.body); if (!body) { fail(res, "Choose a valid plant quantity and request id.", "INVALID_INPUT"); return; }
